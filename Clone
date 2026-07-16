@@ -125,6 +125,27 @@ local function calculateCost(data)
                 end
 
                 if type(fData) == "table" then
+                    -- ==========================================
+                    -- 🔍 DEEP DEBUG SCANNER (Isa lang ang i-scan para iwas lag)
+                    -- ==========================================
+                    if totalItems == 1 then
+                        print("=== 🛠️ RAW FURNITURE DATA 🛠️ ===")
+                        local function dumpTable(t, indent)
+                            indent = indent or ""
+                            for k, v in pairs(t) do
+                                if type(v) == "table" then
+                                    print(indent .. tostring(k) .. ": [Table]")
+                                    dumpTable(v, indent .. "  ") -- Recursive call
+                                else
+                                    print(indent .. tostring(k) .. ": " .. tostring(v))
+                                end
+                            end
+                        end
+                        dumpTable(fData)
+                        print("==================================")
+                    end
+                    -- ==========================================
+
                     estCost += extractPrice(fData)
                 end
             end)
