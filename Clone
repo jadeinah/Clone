@@ -2,7 +2,7 @@
 -- FURNITURE SCANNER & PLACER (WITH CLOUD SHARE CODES & PRO FEATURES)
 -- Created by: Jadey IGOP
 -- UI Powered by: Fluent UI Framework
--- Ultimate Fix: Aggressive Price Extractor (Added "money" keyword)
+-- Ultimate Fix: Updated ClientData Database Retrieval
 -- =========================================================================
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -41,21 +41,17 @@ end
 -- ==================== SMART DATABASE & PRICE EXTRACTOR ====================
 local CachedFurnitureDB = nil
 
--- Ilagay mo ito sa part ng getFurnitureDatabase() sa script mo
 local function getFurnitureDatabase()
     if CachedFurnitureDB then return CachedFurnitureDB end
     
     local db = nil
     
+    -- UPDATE: Gamit ang bagong method base sa Discord clue
     pcall(function()
-        local ClientData = require(game:GetService("ReplicatedStorage").ClientModules.Core.ClientData)
-        
-        -- Method 1: Gamit ang bagong .get() function na nahanap mo
         if ClientData.get then
             db = ClientData.get("furniture_data") or ClientData.get("furniture")
         end
         
-        -- Method 2: Gamit ang .get_data() kung wala sa Method 1
         if not db and ClientData.get_data then
             local allData = ClientData.get_data()
             if type(allData) == "table" then
@@ -64,13 +60,12 @@ local function getFurnitureDatabase()
         end
     end)
     
-    -- Fallback: Hahanapin sa lahat ng naka-load sa memory (Bruteforce)
+    -- Fallback: Kung wala pa rin, hahanapin sa lahat ng naka-load sa memory
     if not db then
         pcall(function()
-            for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+            for _, v in pairs(ReplicatedStorage:GetDescendants()) do
                 if v:IsA("ModuleScript") and string.find(v.Name, "Furniture") then
                     local s, res = pcall(require, v)
-                    -- I-check kung naglalaman ito ng typical furniture IDs tulad ng f-1
                     if s and type(res) == "table" and (res["f-1"] or res[1]) then
                         db = res
                         break
@@ -84,7 +79,6 @@ local function getFurnitureDatabase()
     return db
 end
 
--- Idinagdag natin yung "money" base sa nahanap mong clue!
 local function extractPrice(fData)
     if type(fData) ~= "table" then return 0 end
     
@@ -119,22 +113,10 @@ local function calculateCost(data)
 
     local FurnitureData = getFurnitureDatabase()
 
-    -- 🚨 BAGONG DEBUG: I-check kung may nakuha ba talagang database
-    if totalItems == 0 then
-        print("===========================================")
-        print("🛠️ DEBUGGING DATABASE ALGORITHM 🛠️")
-        print("Database Type:", type(FurnitureData))
-        if type(FurnitureData) == "table" then
-            local count = 0
-            for k,v in pairs(FurnitureData) do count += 1 end
-            print("Total Items Inside Database:", count)
-        end
-    end
-
     for _, furn in ipairs(data.furnitures) do
         totalItems += 1
         if FurnitureData then
-            local success, err = pcall(function()
+            pcall(function()
                 local fData = FurnitureData[furn.kind] or FurnitureData[tostring(furn.kind)]
                 
                 if not fData then
@@ -146,28 +128,10 @@ local function calculateCost(data)
                     end
                 end
 
-                -- 🚨 BAGONG DEBUG: I-print agad ang unang item bago pa i-check kung table siya
-                if totalItems == 1 then
-                    print("--> Item 1 Scanned ID/Kind:", tostring(furn.kind))
-                    print("--> Nahanap ba ang fData nito?:", type(fData))
-                    if type(fData) == "table" then
-                        print("--> Laman ng fData:")
-                        for key, val in pairs(fData) do
-                            print("      " .. tostring(key) .. " = " .. tostring(val))
-                        end
-                    end
-                    print("===========================================")
-                end
-
                 if type(fData) == "table" then
                     estCost += extractPrice(fData)
                 end
             end)
-
-            -- Kung may error na tinatago ang pcall, ipapakita nito:
-            if not success and totalItems == 1 then
-                warn("May error sa paghanap ng presyo (Item 1):", tostring(err))
-            end
         end
     end
     
@@ -228,7 +192,15 @@ Tabs.Scanner:AddButton({
     Callback = function()
         ScanStatus:SetDesc("Status: Scanning...")
         local player = Players.LocalPlayer
-        local houseInterior = ClientData.get_server(player, "house_interior")
+        local houseInterior = nil
+        
+        pcall(function()
+            if ClientData.get_server then
+                houseInterior = ClientData.get_server(player, "house_interior")
+            elseif ClientData.get_data then
+                houseInterior = ClientData.get_data()[player.Name].house_interior
+            end
+        end)
         
         if not houseInterior or not houseInterior.player then 
             ScanStatus:SetDesc("Status: ❌ No house interior found") 
