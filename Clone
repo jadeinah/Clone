@@ -44,39 +44,40 @@ local CachedFurnitureDB = nil
 local function getFurnitureDatabase()
     if CachedFurnitureDB then return CachedFurnitureDB end
     
-    local db = nil
+    local db = {}
     
-    -- UPDATE: Gamit ang bagong method base sa Discord clue
-    pcall(function()
-        if ClientData.get then
-            db = ClientData.get("furniture_data") or ClientData.get("furniture")
-        end
+    -- Gagamitin natin ang mismong Fsys framework ng game na nahanap mo!
+    local success, err = pcall(function()
+        local Fsys = require(game:GetService("ReplicatedStorage").Fsys)
+        local ContentPackHelper = Fsys.load("ContentPackHelper")
         
-        if not db and ClientData.get_data then
-            local allData = ClientData.get_data()
-            if type(allData) == "table" then
-                db = allData.furniture_data or allData.furniture
+        -- Gagayahin natin yung decompiled script mo para kunin ang lahat ng "Furniture"
+        ContentPackHelper.foreach("Furniture", function(pack)
+            for _, item in pairs(pack) do
+                db[item.kind] = item
             end
-        end
+        end)
     end)
     
-    -- Fallback: Kung wala pa rin, hahanapin sa lahat ng naka-load sa memory
-    if not db then
+    if success and next(db) then 
+        CachedFurnitureDB = db 
+        return db
+    else
+        warn("Failed to load using ContentPackHelper: ", err)
+    end
+    
+    -- Fallback kung sakali
+    if not next(db) then
         pcall(function()
-            for _, v in pairs(ReplicatedStorage:GetDescendants()) do
-                if v:IsA("ModuleScript") and string.find(v.Name, "Furniture") then
-                    local s, res = pcall(require, v)
-                    if s and type(res) == "table" and (res["f-1"] or res[1]) then
-                        db = res
-                        break
-                    end
-                end
+            local ClientData = require(game:GetService("ReplicatedStorage").ClientModules.Core.ClientData)
+            if ClientData.get then db = ClientData.get("furniture_data") or ClientData.get("furniture") end
+            if not db and ClientData.get_data then 
+                db = ClientData.get_data().furniture_data 
             end
         end)
     end
     
-    if type(db) == "table" then CachedFurnitureDB = db end
-    return db
+    return next(db) and db or nil
 end
 
 local function extractPrice(fData)
