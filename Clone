@@ -109,10 +109,22 @@ local function calculateCost(data)
 
     local FurnitureData = getFurnitureDatabase()
 
+    -- 🚨 BAGONG DEBUG: I-check kung may nakuha ba talagang database
+    if totalItems == 0 then
+        print("===========================================")
+        print("🛠️ DEBUGGING DATABASE ALGORITHM 🛠️")
+        print("Database Type:", type(FurnitureData))
+        if type(FurnitureData) == "table" then
+            local count = 0
+            for k,v in pairs(FurnitureData) do count += 1 end
+            print("Total Items Inside Database:", count)
+        end
+    end
+
     for _, furn in ipairs(data.furnitures) do
         totalItems += 1
         if FurnitureData then
-            pcall(function()
+            local success, err = pcall(function()
                 local fData = FurnitureData[furn.kind] or FurnitureData[tostring(furn.kind)]
                 
                 if not fData then
@@ -124,31 +136,28 @@ local function calculateCost(data)
                     end
                 end
 
-                if type(fData) == "table" then
-                    -- ==========================================
-                    -- 🔍 DEEP DEBUG SCANNER (Isa lang ang i-scan para iwas lag)
-                    -- ==========================================
-                    if totalItems == 1 then
-                        print("=== 🛠️ RAW FURNITURE DATA 🛠️ ===")
-                        local function dumpTable(t, indent)
-                            indent = indent or ""
-                            for k, v in pairs(t) do
-                                if type(v) == "table" then
-                                    print(indent .. tostring(k) .. ": [Table]")
-                                    dumpTable(v, indent .. "  ") -- Recursive call
-                                else
-                                    print(indent .. tostring(k) .. ": " .. tostring(v))
-                                end
-                            end
+                -- 🚨 BAGONG DEBUG: I-print agad ang unang item bago pa i-check kung table siya
+                if totalItems == 1 then
+                    print("--> Item 1 Scanned ID/Kind:", tostring(furn.kind))
+                    print("--> Nahanap ba ang fData nito?:", type(fData))
+                    if type(fData) == "table" then
+                        print("--> Laman ng fData:")
+                        for key, val in pairs(fData) do
+                            print("      " .. tostring(key) .. " = " .. tostring(val))
                         end
-                        dumpTable(fData)
-                        print("==================================")
                     end
-                    -- ==========================================
+                    print("===========================================")
+                end
 
+                if type(fData) == "table" then
                     estCost += extractPrice(fData)
                 end
             end)
+
+            -- Kung may error na tinatago ang pcall, ipapakita nito:
+            if not success and totalItems == 1 then
+                warn("May error sa paghanap ng presyo (Item 1):", tostring(err))
+            end
         end
     end
     
