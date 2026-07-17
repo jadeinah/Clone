@@ -163,57 +163,13 @@ local function loadSavedData(fileName)
     return false
 end
 
--- ==================== SMART SERVER HOP (ULTIMATE FIX) ====================
+-- ==================== SIMPLE SERVER HOP ====================
 local function serverHop()
-    Fluent:Notify({ Title = "Server Hop", Content = "Searching for available Adopt Me servers...", Duration = 3 })
+    Fluent:Notify({ Title = "Server Hop", Content = "Teleporting via Matchmaking...", Duration = 3 })
     
-    local adoptMeId = 920587237
-    local validServers = {}
-    
-    -- Fallback system: Listahan ng mga API links. Kung down ang isa, susubukan yung susunod.
-    local apiLinks = {
-        "https://games.roproxy.com/v1/places/" .. tostring(adoptMeId) .. "/servers/Public?sortOrder=Desc&limit=100",
-        "https://games.roblox.com/v1/places/" .. tostring(adoptMeId) .. "/servers/Public?sortOrder=Desc&limit=100"
-    }
-
-    local dataFetched = false
-
-    for _, url in ipairs(apiLinks) do
-        if dataFetched then break end -- Stop na maghanap kapag nakakuha na ng working list
-        
-        local success, response = pcall(function()
-            return httprequest({ Url = url, Method = "GET" })
-        end)
-        
-        if success and response and response.Body then
-            -- Safely i-decode yung JSON. Kung HTML error page ang binigay ng proxy, i-i-ignore niya ito.
-            local decodeSuccess, result = pcall(function()
-                return HttpService:JSONDecode(response.Body)
-            end)
-            
-            if decodeSuccess and result and result.data then
-                for _, server in pairs(result.data) do
-                    -- Check kung may bakante (allowance na 2 slots para sa main at alt account mo)
-                    if server.id ~= game.JobId and server.playing and server.maxPlayers then
-                        if server.playing <= (server.maxPlayers - 2) then
-                            table.insert(validServers, server.id)
-                        end
-                    end
-                end
-                dataFetched = true -- Mark as successful
-            end
-        end
-    end
-    
-    if dataFetched and #validServers > 0 then
-        -- Kukuha ng random server mula sa valid list
-        local randomServer = validServers[math.random(1, #validServers)]
-        Fluent:Notify({ Title = "Server Hop", Content = "Found a server! Teleporting...", Duration = 3 })
-        task.wait(0.5)
-        TeleportService:TeleportToPlaceInstance(adoptMeId, randomServer, Players.LocalPlayer)
-    else
-        Fluent:Notify({ Title = "Server Hop", Content = "API Error or all servers are full. Try again.", Duration = 4 })
-    end
+    -- Gamitin na natin yung exact ID na binigay mo
+    local adoptMeId = 920587237 
+    TeleportService:Teleport(adoptMeId, Players.LocalPlayer)
 end
 
 -- ==================== UI SETUP ====================
