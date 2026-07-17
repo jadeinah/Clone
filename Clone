@@ -566,9 +566,16 @@ end})
 Tabs.Misc:AddSection("🌐 Server Management")
 
 Tabs.Misc:AddButton({
-    Title = "🚀 Server Hop",
+    Title = "🚀 Server Hop (Normal)",
     Callback = function()
         serverHop()
+    end
+})
+
+Tabs.Misc:AddButton({
+    Title = "📈 Hop to Trading Server",
+    Callback = function()
+        serverHopTrading()
     end
 })
 
