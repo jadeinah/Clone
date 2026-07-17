@@ -214,6 +214,13 @@ local function serverHop()
     TeleportService:Teleport(adoptMeId, Players.LocalPlayer)
 end
 
+-- BAGONG FUNCTION PARA SA TRADING SERVER
+local function serverHopTrading()
+    Fluent:Notify({ Title = "Trading Server Hop", Content = "Teleporting to Trading Server...", Duration = 3 })
+    local tradingId = 132388544979740 
+    TeleportService:Teleport(tradingId, Players.LocalPlayer)
+end
+
 -- ==================== UI SETUP ====================
 local Window = Fluent:CreateWindow({
     Title = "Furniture Scanner & Placer",
