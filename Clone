@@ -575,7 +575,9 @@ Tabs.Misc:AddButton({
 Tabs.Misc:AddButton({
     Title = "📈 Hop to Trading Server",
     Callback = function()
-        serverHopTrading()
+        Fluent:Notify({ Title = "Trading Server", Content = "Teleporting to Trading Server...", Duration = 3 })
+        local tradingId = 132388544979740 
+        game:GetService("TeleportService"):Teleport(tradingId, game:GetService("Players").LocalPlayer)
     end
 })
 
