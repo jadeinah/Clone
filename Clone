@@ -2,8 +2,8 @@
 -- FURNITURE SCANNER & PLACER (WITH CLOUD SHARE CODES & PRO FEATURES)
 -- Created by: Jadey IGOP
 -- UI Powered by: Fluent UI Framework
--- Ultimate Fix: Updated ClientData Database Retrieval
--- Added Feature: Smart Server Hop
+-- Ultimate Fix: Updated ClientData Database Retrieval & Price Parsing
+-- Added Feature: Simple Server Hop (Clean Price Fallback to $0)
 -- =========================================================================
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -54,7 +54,10 @@ local function getFurnitureDatabase()
         
         ContentPackHelper.foreach("Furniture", function(pack)
             for _, item in pairs(pack) do
-                db[item.kind] = item
+                local key = item.kind or item.id or item.name
+                if key then
+                    db[tostring(key)] = item
+                end
             end
         end)
     end)
@@ -69,31 +72,71 @@ local function getFurnitureDatabase()
     if not next(db) then
         pcall(function()
             local ClientData = require(game:GetService("ReplicatedStorage").ClientModules.Core.ClientData)
-            if ClientData.get then db = ClientData.get("furniture_data") or ClientData.get("furniture") end
-            if not db and ClientData.get_data then 
-                db = ClientData.get_data().furniture_data 
+            local rawDB = nil
+            if ClientData.get then 
+                rawDB = ClientData.get("furniture_data") or ClientData.get("furniture") 
+            end
+            if not rawDB and ClientData.get_data then 
+                rawDB = ClientData.get_data().furniture_data 
+            end
+            
+            if type(rawDB) == "table" then
+                for k, v in pairs(rawDB) do
+                    local key = k or (type(v) == "table" and (v.kind or v.id or v.name))
+                    if key then
+                        db[tostring(key)] = v
+                    end
+                end
             end
         end)
     end
     
-    return next(db) and db or nil
+    CachedFurnitureDB = next(db) and db or nil
+    return CachedFurnitureDB
 end
 
 local function extractPrice(fData)
     if type(fData) ~= "table" then return 0 end
     
+    local function findNumberInTable(tbl)
+        if type(tbl) ~= "table" then return nil end
+        local currencyKeys = {"bucks", "Bucks", "robux", "Robux", "value", "Value", "amount", "price", "Price", "cost", "Cost", "money", "Money"}
+        for _, k in ipairs(currencyKeys) do
+            if type(tbl[k]) == "number" then
+                return tbl[k]
+            end
+        end
+        for _, v in pairs(tbl) do
+            if type(v) == "number" then
+                return v
+            end
+        end
+        return nil
+    end
+
     local knownKeys = {"price", "Price", "cost", "Cost", "bucks", "Bucks", "money", "Money", "buy_price", "amount", "value", "Value"}
     for _, key in ipairs(knownKeys) do
-        if fData[key] and type(fData[key]) == "number" then
-            return fData[key]
+        local val = fData[key]
+        if val then
+            if type(val) == "number" then
+                return val
+            elseif type(val) == "table" then
+                local num = findNumberInTable(val)
+                if num then return num end
+            end
         end
     end
 
     for k, v in pairs(fData) do
-        if type(v) == "number" and type(k) == "string" then
+        if type(k) == "string" then
             local lowerK = string.lower(k)
             if string.find(lowerK, "price") or string.find(lowerK, "cost") or string.find(lowerK, "buck") or string.find(lowerK, "money") then
-                return v
+                if type(v) == "number" then
+                    return v
+                elseif type(v) == "table" then
+                    local num = findNumberInTable(v)
+                    if num then return num end
+                end
             end
         end
     end
@@ -119,7 +162,7 @@ local function calculateCost(data)
                 
                 if not fData then
                     for _, v in pairs(FurnitureData) do
-                        if type(v) == "table" and (v.id == furn.kind or v.name == furn.kind) then
+                        if type(v) == "table" and (v.id == furn.kind or v.name == furn.kind or v.kind == furn.kind) then
                             fData = v
                             break
                         end
@@ -166,8 +209,6 @@ end
 -- ==================== SIMPLE SERVER HOP ====================
 local function serverHop()
     Fluent:Notify({ Title = "Server Hop", Content = "Teleporting via Matchmaking...", Duration = 3 })
-    
-    -- Gamitin na natin yung exact ID na binigay mo
     local adoptMeId = 920587237 
     TeleportService:Teleport(adoptMeId, Players.LocalPlayer)
 end
@@ -245,14 +286,6 @@ Tabs.Scanner:AddButton({
         local items, cost = calculateCost(scannedData)
         
         local costString = "$" .. tostring(cost)
-        if items > 0 and cost == 0 then
-            if not CachedFurnitureDB then
-                costString = "? (Database Mismatch)"
-            else
-                costString = "? (Game Obfuscated Prices)"
-            end
-        end
-        
         ScanStatus:SetDesc(string.format("✅ Saved! %d furnitures (Est. Value: %s)", items, costString))
         
         if PlaceStatus then 
@@ -285,7 +318,7 @@ Tabs.SaveLoad:AddInput("LoadName", {
 Tabs.SaveLoad:AddButton({ Title = "📂 Load from PC", Callback = function()
     if loadSavedData(loadNameInput:gsub("[^%w_-]", "_")) then
         local items, cost = calculateCost(scannedData)
-        local costStr = (cost > 0) and ("$" .. cost) or "? (Hidden)"
+        local costStr = "$" .. tostring(cost)
         
         SaveStatus:SetDesc(string.format("✅ Loaded: %s\n💰 Cost: %s", loadNameInput, costStr))
         if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costStr)) end
@@ -375,7 +408,7 @@ Tabs.SaveLoad:AddButton({
                 recentCodesDropdown:SetValues(recentCodes)
 
                 local items, cost = calculateCost(scannedData)
-                local costStr = (cost > 0) and ("$" .. cost) or "? (Hidden)"
+                local costStr = "$" .. tostring(cost)
                 
                 SaveStatus:SetDesc(string.format("✅ Cloud Downloaded!\n💰 Cost: %s", costStr))
                 if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costStr)) end
