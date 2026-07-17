@@ -163,32 +163,41 @@ local function loadSavedData(fileName)
     return false
 end
 
--- ==================== SERVER HOP LOGIC ====================
+-- ==================== SMART SERVER HOP (ADOPT ME OPTIMIZED) ====================
 local function serverHop()
+    Fluent:Notify({ Title = "Server Hop", Content = "Searching for available Adopt Me servers...", Duration = 3 })
+    
+    local adoptMeId = 920587237 -- Hardcoded Place ID na binigay mo
+    
     local success, result = pcall(function()
-        -- Pinalitan natin ang 'roblox.com' ng 'roproxy.com' para ma-bypass ang executor blocks
-        local url = "https://games.roproxy.com/v1/places/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
-        return HttpService:JSONDecode(game:HttpGet(url))
+        -- Gamit ang httprequest at excludeFullGames filter para mas mabilis
+        local response = httprequest({
+            Url = "https://games.roproxy.com/v1/places/" .. tostring(adoptMeId) .. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100",
+            Method = "GET"
+        })
+        return HttpService:JSONDecode(response.Body)
     end)
     
     if success and result and result.data then
         local validServers = {}
         for _, server in pairs(result.data) do
-            -- Sinisiguro natin na hindi puno ang server at hindi ito yung current server mo
-            if server.id ~= game.JobId and server.playing and server.maxPlayers and server.playing < server.maxPlayers then
+            -- Nag-iwan tayo ng allowance (-2) para may space ka at ang alt mo
+            if server.id ~= game.JobId and server.playing and server.maxPlayers and server.playing <= (server.maxPlayers - 2) then
                 table.insert(validServers, server.id)
             end
         end
         
         if #validServers > 0 then
-            Fluent:Notify({ Title = "Server Hop", Content = "Teleporting to a new server...", Duration = 3 })
+            -- Kukuha ng random server para iwas pabalik-balik sa iisang server
+            local randomServer = validServers[math.random(1, #validServers)]
+            Fluent:Notify({ Title = "Server Hop", Content = "Found a server! Teleporting...", Duration = 3 })
             task.wait(0.5)
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, validServers[math.random(1, #validServers)], Players.LocalPlayer)
+            TeleportService:TeleportToPlaceInstance(adoptMeId, randomServer, Players.LocalPlayer)
         else
-            Fluent:Notify({ Title = "Server Hop", Content = "No alternative servers found.", Duration = 3 })
+            Fluent:Notify({ Title = "Server Hop", Content = "All top servers are almost full. Try again.", Duration = 3 })
         end
     else
-        Fluent:Notify({ Title = "Server Hop", Content = "Failed to fetch server list. Try again.", Duration = 3 })
+        Fluent:Notify({ Title = "Server Hop", Content = "Failed to fetch servers from proxy.", Duration = 3 })
     end
 end
 
