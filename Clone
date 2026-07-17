@@ -1,5 +1,5 @@
 -- =========================================================================
--- FURNITURE SCANNER & PLACER (WITH CLOUD SHARE CODES & PRO FEATURES)
+-- FURNITURE SCANNER & PLACER (LOCAL CLOUD EDITION)
 -- Created by: Jadey IGOP
 -- UI Powered by: Fluent UI Framework
 -- Ultimate Fix: Updated ClientData Database Retrieval & Price Parsing
@@ -14,9 +14,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 
--- === CLOUD API SETUP ===
-local JSONBIN_URL = "https://api.jsonbin.io/v3/b"
-local API_KEY = "$2a$10$/9VAuB/4nrYAxMrLQ2hCSetkLBRJ7IW9Eo9lo1pL2nwJWf4ZG06Zm"
+-- === LOCAL CLOUD API SETUP ===
+-- Nakaturo na ito sa IPv4 address ng PC mo para walang rate limit o block
+local JSONBIN_URL = "http://192.168.100.83:5000/v3/b"
+local API_KEY = "LOCAL_BYPASS" 
 local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 
 local FOLDER_NAME = "Jadey IGOP"
@@ -328,15 +329,15 @@ Tabs.SaveLoad:AddButton({ Title = "📂 Load from PC", Callback = function()
     end
 end})
 
-Tabs.SaveLoad:AddSection("☁️ Cloud Share (Online Codes)")
+Tabs.SaveLoad:AddSection("☁️ Server Share (Local Code)")
 
 Tabs.SaveLoad:AddButton({
-    Title = "⬆️ Upload to Cloud (Get Share Code)",
+    Title = "⬆️ Upload to Local Server",
     Callback = function()
         if not httprequest then return Fluent:Notify({ Title = "Error", Content = "Your executor does not support HTTP requests.", Duration = 5 }) end
         if #scannedData.furnitures == 0 then return Fluent:Notify({ Title = "Error", Content = "Scan a house first!", Duration = 3 }) end
 
-        SaveStatus:SetDesc("Status: ⏳ Uploading to Cloud...")
+        SaveStatus:SetDesc("Status: ⏳ Uploading to Server...")
         local success, response = pcall(function()
             return httprequest({
                 Url = JSONBIN_URL,
@@ -344,7 +345,6 @@ Tabs.SaveLoad:AddButton({
                 Headers = {
                     ["Content-Type"] = "application/json",
                     ["X-Master-Key"] = API_KEY,
-                    ["X-Bin-Name"] = "Jadey_House_" .. tostring(math.random(1000,9999))
                 },
                 Body = HttpService:JSONEncode(scannedData)
             })
@@ -356,18 +356,16 @@ Tabs.SaveLoad:AddButton({
                 local shareCode = decoded.metadata.id
                 if setclipboard then setclipboard(shareCode) end
                 SaveStatus:SetDesc("✅ Uploaded!\nCode: " .. shareCode .. "\n(Copied to clipboard!)")
-                Fluent:Notify({ Title = "Cloud Success!", Content = "Code generated: " .. shareCode, Duration = 10 })
+                Fluent:Notify({ Title = "Success!", Content = "Code generated: " .. shareCode, Duration = 10 })
             else
-                -- Expose the exact HTTP error code and body
-                warn("JSONBin Error: HTTP " .. tostring(response.StatusCode) .. " - " .. tostring(response.Body))
+                warn("Server Error: HTTP " .. tostring(response.StatusCode) .. " - " .. tostring(response.Body))
                 SaveStatus:SetDesc("❌ HTTP Error: " .. tostring(response.StatusCode))
-                Fluent:Notify({ Title = "Upload Failed", Content = "API returned HTTP " .. tostring(response.StatusCode), Duration = 5 })
+                Fluent:Notify({ Title = "Upload Failed", Content = "Server returned HTTP " .. tostring(response.StatusCode), Duration = 5 })
             end
         else
-            -- Expose if the executor blocked the request entirely
-            warn("HTTP Request failed entirely. The executor may be blocking the domain.")
-            SaveStatus:SetDesc("❌ Request blocked or failed locally.")
-            Fluent:Notify({ Title = "Error", Content = "Failed to reach cloud server.", Duration = 3 })
+            warn("HTTP Request failed entirely. Is the Python server running on 192.168.100.83?")
+            SaveStatus:SetDesc("❌ Cannot connect to local server.")
+            Fluent:Notify({ Title = "Connection Error", Content = "Is Python server running?", Duration = 3 })
         end
     end
 })
@@ -376,7 +374,7 @@ local cloudCodeInput = ""
 local recentCodesDropdown
 
 recentCodesDropdown = Tabs.SaveLoad:AddDropdown("RecentCodes", {
-    Title = "📜 Recent Cloud Codes",
+    Title = "📜 Recent Local Codes",
     Values = recentCodes,
     Multi = false,
     Default = nil,
@@ -393,12 +391,12 @@ Tabs.SaveLoad:AddInput("CloudCode", {
 })
 
 Tabs.SaveLoad:AddButton({
-    Title = "⬇️ Load House from Cloud Code",
+    Title = "⬇️ Load House from Server",
     Callback = function()
         if not httprequest then return Fluent:Notify({ Title = "Error", Content = "Not supported.", Duration = 5 }) end
-        if cloudCodeInput == "" or #cloudCodeInput < 10 then return Fluent:Notify({ Title = "Error", Content = "Invalid code.", Duration = 3 }) end
+        if cloudCodeInput == "" then return Fluent:Notify({ Title = "Error", Content = "Invalid code.", Duration = 3 }) end
 
-        SaveStatus:SetDesc("Status: ⏳ Downloading from Cloud...")
+        SaveStatus:SetDesc("Status: ⏳ Downloading from Server...")
 
         local success, response = pcall(function()
             return httprequest({
@@ -408,25 +406,30 @@ Tabs.SaveLoad:AddButton({
             })
         end)
 
-        if success and response and response.StatusCode == 200 then
-            local decoded = HttpService:JSONDecode(response.Body)
-            if decoded.record and decoded.record.furnitures then
-                scannedData = decoded.record
-                
-                saveRecentCode(cloudCodeInput)
-                recentCodesDropdown:SetValues(recentCodes)
+        if success and response then
+            if response.StatusCode == 200 then
+                local decoded = HttpService:JSONDecode(response.Body)
+                if decoded.record and decoded.record.furnitures then
+                    scannedData = decoded.record
+                    
+                    saveRecentCode(cloudCodeInput)
+                    recentCodesDropdown:SetValues(recentCodes)
 
-                local items, cost = calculateCost(scannedData)
-                local costStr = "$" .. tostring(cost)
-                
-                SaveStatus:SetDesc(string.format("✅ Cloud Downloaded!\n💰 Cost: %s", costStr))
-                if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costStr)) end
-                Fluent:Notify({ Title = "Cloud Downloaded!", Content = "House is ready to place!", Duration = 5 })
+                    local items, cost = calculateCost(scannedData)
+                    local costStr = "$" .. tostring(cost)
+                    
+                    SaveStatus:SetDesc(string.format("✅ Downloaded!\n💰 Cost: %s", costStr))
+                    if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costStr)) end
+                    Fluent:Notify({ Title = "Downloaded!", Content = "House is ready to place!", Duration = 5 })
+                else
+                    SaveStatus:SetDesc("❌ Invalid Data in Server.")
+                end
             else
-                SaveStatus:SetDesc("❌ Invalid Data in Cloud.")
+                 SaveStatus:SetDesc("❌ File Not Found or Server Error.")
             end
         else
-            SaveStatus:SetDesc("❌ Invalid Code or Not Found.")
+            SaveStatus:SetDesc("❌ Cannot connect to local server.")
+            Fluent:Notify({ Title = "Connection Error", Content = "Is Python server running?", Duration = 3 })
         end
     end
 })
