@@ -350,14 +350,23 @@ Tabs.SaveLoad:AddButton({
             })
         end)
 
-        if success and response and response.StatusCode == 200 then
-            local decoded = HttpService:JSONDecode(response.Body)
-            local shareCode = decoded.metadata.id
-            if setclipboard then setclipboard(shareCode) end
-            SaveStatus:SetDesc("✅ Uploaded!\nCode: " .. shareCode .. "\n(Copied to clipboard!)")
-            Fluent:Notify({ Title = "Cloud Success!", Content = "Code generated: " .. shareCode, Duration = 10 })
+        if success and response then
+            if response.StatusCode == 200 then
+                local decoded = HttpService:JSONDecode(response.Body)
+                local shareCode = decoded.metadata.id
+                if setclipboard then setclipboard(shareCode) end
+                SaveStatus:SetDesc("✅ Uploaded!\nCode: " .. shareCode .. "\n(Copied to clipboard!)")
+                Fluent:Notify({ Title = "Cloud Success!", Content = "Code generated: " .. shareCode, Duration = 10 })
+            else
+                -- Expose the exact HTTP error code and body
+                warn("JSONBin Error: HTTP " .. tostring(response.StatusCode) .. " - " .. tostring(response.Body))
+                SaveStatus:SetDesc("❌ HTTP Error: " .. tostring(response.StatusCode))
+                Fluent:Notify({ Title = "Upload Failed", Content = "API returned HTTP " .. tostring(response.StatusCode), Duration = 5 })
+            end
         else
-            SaveStatus:SetDesc("❌ Failed to upload.")
+            -- Expose if the executor blocked the request entirely
+            warn("HTTP Request failed entirely. The executor may be blocking the domain.")
+            SaveStatus:SetDesc("❌ Request blocked or failed locally.")
             Fluent:Notify({ Title = "Error", Content = "Failed to reach cloud server.", Duration = 3 })
         end
     end
