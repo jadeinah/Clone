@@ -16,7 +16,7 @@ local TeleportService = game:GetService("TeleportService")
 
 -- === CLOUD API SETUP ===
 local JSONBIN_URL = "https://api.jsonbin.io/v3/b"
-local API_KEY = "$2a$10$vw5.wqg22dK29I8WRv5n9u33gnehsiyp6HDM2vwhd//QNKQPO98KC"
+local API_KEY = "$2a$10$/9VAuB/4nrYAxMrLQ2hCSetkLBRJ7IW9Eo9lo1pL2nwJWf4ZG06Zm"
 local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 
 local FOLDER_NAME = "Jadey IGOP"
