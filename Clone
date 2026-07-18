@@ -251,7 +251,7 @@ end})
 
 -- ==================== PLACER TAB ====================
 local PlaceStatus = Tabs.Placer:AddParagraph({ Title = "Placer Status", Content = "Waiting..." })
-Tabs.Placer:AddSlider("WaitTime", { Title = "Wait Time", Default = 0.05, Min = 0.01, Max = 1.0, Callback = function(v) globalWaitTime = v end })
+Tabs.Placer:AddSlider("WaitTime", { Title = "Wait Time", Default = 0.05, Min = 0.01, Max = 1.0, Rounding = 2, Callback = function(v) globalWaitTime = v end })
 Tabs.Placer:AddButton({ Title = "🛑 STOP", Callback = function() isWorking = false end })
 
 Tabs.Placer:AddButton({ Title = "🏠 Place Full Auto", Callback = function()
@@ -291,7 +291,7 @@ end})
 -- ==================== DELETE TAB ====================
 local DeleteStatus = Tabs.Delete:AddParagraph({ Title = "Status", Content = "Ready" })
 local deleteRange = 500
-Tabs.Delete:AddSlider("DeleteRange", { Title = "Delete Range", Default = 500, Min = 1, Max = 2000, Callback = function(v) deleteRange = v end })
+Tabs.Delete:AddSlider("DeleteRange", { Title = "Delete Range", Default = 500, Min = 1, Max = 2000, Rounding = 0, Callback = function(v) deleteRange = v end })
 Tabs.Delete:AddButton({ Title = "🛑 STOP", Callback = function() isWorking = false end })
 Tabs.Delete:AddButton({ Title = "🗑️ Delete All Furnitures", Callback = function()
     isWorking = true 
