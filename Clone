@@ -336,10 +336,15 @@ Tabs.Teleports:AddButton({ Title = "🏠 Teleport to House Door", Callback = fun
         if (owner == selPlayer) or (ownerVal and ownerVal.Value == Players:FindFirstChild(selPlayer)) then
             local houseModel = plot:FindFirstChildWhichIsA("Model")
             if houseModel then
-                -- Follow exact image path: Folder -> HouseModel -> Doors -> MainDoor -> Door
-                local door = houseModel:FindFirstChild("Doors") and houseModel.Doors:FindFirstChild("MainDoor") and houseModel.Doors.MainDoor:FindFirstChild("Door")
+                -- Target TouchToEnter direct path
+                local door = houseModel:FindFirstChild("Doors") 
+                             and houseModel.Doors:FindFirstChild("MainDoor") 
+                             and houseModel.Doors.MainDoor:FindFirstChild("WorkingParts")
+                             and houseModel.Doors.MainDoor.WorkingParts:FindFirstChild("TouchToEnter")
+                             
                 if door then
-                    char.HumanoidRootPart.CFrame = door.CFrame + Vector3.new(0, 3, 0)
+                    -- TP explicitly to the TouchToEnter CFrame to trigger it instantly
+                    char.HumanoidRootPart.CFrame = door.CFrame
                     found = true
                     Fluent:Notify({ Title = "Success", Content = "Jumped to " .. selPlayer .. "'s door.", Duration = 3 })
                     break
@@ -372,12 +377,14 @@ task.spawn(function()
                         local uniqueKey = plot.Name .. "_" .. houseModel.Name .. "_" .. tostring(owner)
                         
                         if not sessionVisitedPlots[uniqueKey] then
+                            -- Updated path for Auto-Tour
                             local door = houseModel:FindFirstChild("Doors") 
                                          and houseModel.Doors:FindFirstChild("MainDoor") 
-                                         and houseModel.Doors.MainDoor:FindFirstChild("Door")
+                                         and houseModel.Doors.MainDoor:FindFirstChild("WorkingParts")
+                                         and houseModel.Doors.MainDoor.WorkingParts:FindFirstChild("TouchToEnter")
                                          
                             if door and door:IsA("BasePart") then
-                                char.HumanoidRootPart.CFrame = door.CFrame + Vector3.new(0, 2, 0)
+                                char.HumanoidRootPart.CFrame = door.CFrame
                                 sessionVisitedPlots[uniqueKey] = true
                                 
                                 Fluent:Notify({
