@@ -2,8 +2,7 @@
 -- FURNITURE SCANNER, PLACER, & AUTO-HARVESTER (LOCAL CLOUD EDITION)
 -- Created by: Jadey IGOP & AI Collaborator
 -- UI Powered by: Fluent UI Framework
--- Ultimate Fix: Updated ClientData Database Retrieval & Price Parsing
--- Added Features: Auto-Scan on TP, Anti-Clone Detection, Player Teleports
+-- Ultimate Fix: Workspace.HouseExteriors Auto-Tour & No-Repeat Teleports
 -- =========================================================================
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -28,9 +27,10 @@ if not isfolder(FOLDER_NAME) then makefolder(FOLDER_NAME) end
 
 local isWorking = false 
 local autoScanEnabled = true
+local autoTourEnabled = false -- New Toggle for Physical Teleporting
 local recentCodes = {}
 local visitedHouses = {}
-local lastTrackedHouseFingerprint = ""
+local sessionVisitedPlots = {} -- Prevents teleporting to the same door twice
 
 -- Load Cache Files
 if isfile(RECENT_CODES_FILE) then
@@ -55,10 +55,9 @@ local function getFurnitureDatabase()
     if CachedFurnitureDB then return CachedFurnitureDB end
     local db = {}
     
-    local success, err = pcall(function()
+    pcall(function()
         local Fsys = require(game:GetService("ReplicatedStorage").Fsys)
         local ContentPackHelper = Fsys.load("ContentPackHelper")
-        
         ContentPackHelper.foreach("Furniture", function(pack)
             for _, item in pairs(pack) do
                 local key = item.kind or item.id or item.name
@@ -67,20 +66,13 @@ local function getFurnitureDatabase()
         end)
     end)
     
-    if success and next(db) then 
+    if next(db) then 
         CachedFurnitureDB = db 
         return db
     end
     
     pcall(function()
-        local rawDB = nil
-        if ClientData.get then 
-            rawDB = ClientData.get("furniture_data") or ClientData.get("furniture") 
-        end
-        if not rawDB and ClientData.get_data then 
-            rawDB = ClientData.get_data().furniture_data 
-        end
-        
+        local rawDB = (ClientData.get and (ClientData.get("furniture_data") or ClientData.get("furniture"))) or (ClientData.get_data and ClientData.get_data().furniture_data)
         if type(rawDB) == "table" then
             for k, v in pairs(rawDB) do
                 local key = k or (type(v) == "table" and (v.kind or v.id or v.name))
@@ -95,11 +87,9 @@ end
 
 local function extractPrice(fData)
     if type(fData) ~= "table" then return 0 end
-    
-    local function findNumberInTable(tbl)
+    local function findNum(tbl)
         if type(tbl) ~= "table" then return nil end
-        local currencyKeys = {"bucks", "Bucks", "robux", "Robux", "value", "Value", "amount", "price", "Price", "cost", "Cost", "money", "Money"}
-        for _, k in ipairs(currencyKeys) do
+        for _, k in ipairs({"bucks", "Bucks", "robux", "Robux", "value", "Value", "amount", "price", "Price", "cost", "Cost", "money", "Money"}) do
             if type(tbl[k]) == "number" then return tbl[k] end
         end
         for _, v in pairs(tbl) do
@@ -108,13 +98,12 @@ local function extractPrice(fData)
         return nil
     end
 
-    local knownKeys = {"price", "Price", "cost", "Cost", "bucks", "Bucks", "money", "Money", "buy_price", "amount", "value", "Value"}
-    for _, key in ipairs(knownKeys) do
+    for _, key in ipairs({"price", "Price", "cost", "Cost", "bucks", "Bucks", "money", "Money", "buy_price", "amount", "value", "Value"}) do
         local val = fData[key]
         if val then
             if type(val) == "number" then return val
             elseif type(val) == "table" then
-                local num = findNumberInTable(val)
+                local num = findNum(val)
                 if num then return num end
             end
         end
@@ -123,10 +112,8 @@ local function extractPrice(fData)
 end
 
 local function calculateCost(data)
-    local totalItems = 0
-    local estCost = 0
+    local totalItems, estCost = 0, 0
     if not data or type(data.furnitures) ~= "table" then return totalItems, estCost end
-
     local FurnitureData = getFurnitureDatabase()
     for _, furn in ipairs(data.furnitures) do
         totalItems += 1
@@ -151,82 +138,52 @@ end
 local scannedData = { furnitures = {}, textures = {}, ambiances = {}, buildingType = nil }
 local globalWaitTime = 0.05
 
-local function loadSavedData(fileName)
-    local filePath = FOLDER_NAME .. "/" .. fileName .. ".json"
-    if isfile(filePath) then
-        local success, data = pcall(function() return HttpService:JSONDecode(readfile(filePath)) end)
-        if success and data and data.furnitures then scannedData = data return true end
-    end
-    return false
-end
-
--- ==================== DETERMINISTIC CLONE DETECTION & AUTO-SCANNER ====================
+-- ==================== DETERMINISTIC CLONE DETECTION ====================
 local function getHouseFingerprint(houseInterior)
-    if not houseInterior or not houseInterior.furniture then return nil end
+    if not houseInterior or type(houseInterior) ~= "table" or not houseInterior.furniture then return nil end
     local structuralTokens = {}
     local totalItems = 0
-    
     for _, f in pairs(houseInterior.furniture) do
         totalItems = totalItems + 1
         table.insert(structuralTokens, tostring(f.id))
     end
     table.sort(structuralTokens)
     local structuralString = table.concat(structuralTokens, ",")
-    
     local checksum = 0
     for i = 1, #structuralString do
         checksum = (checksum + string.byte(structuralString, i)) % 999999
     end
-    
     return (houseInterior.building_type or "unknown") .. "_items" .. tostring(totalItems) .. "_sum" .. tostring(checksum)
 end
 
 local function parseHouseData(houseInterior)
     local data = { furnitures = {}, textures = {}, ambiances = {}, buildingType = houseInterior.building_type }
     if houseInterior.furniture then
-        for _, furniture in pairs(houseInterior.furniture) do
+        for _, f in pairs(houseInterior.furniture) do
             local colors = {}
-            if furniture.colors then
-                for i, color in pairs(furniture.colors) do 
-                    colors[i] = typeof(color) == "Color3" and {color.R, color.G, color.B} or color 
-                end
+            if f.colors then
+                for i, c in pairs(f.colors) do colors[i] = typeof(c) == "Color3" and {c.R, c.G, c.B} or c end
             end
             table.insert(data.furnitures, {
-                kind = furniture.id,
-                properties = { cframe = furniture.cframe and {furniture.cframe:GetComponents()} or nil, scale = furniture.scale, colors = next(colors) and colors or nil }
+                kind = f.id,
+                properties = { cframe = f.cframe and {f.cframe:GetComponents()} or nil, scale = f.scale, colors = next(colors) and colors or nil }
             })
         end
     end
     if houseInterior.textures then
-        for roomName, texture in pairs(houseInterior.textures) do
-            if texture and texture.walls then table.insert(data.textures, {room = roomName, type = "walls", id = texture.walls}) end
-            if texture and texture.floors then table.insert(data.textures, {room = roomName, type = "floors", id = texture.floors}) end
+        for room, tex in pairs(houseInterior.textures) do
+            if tex.walls then table.insert(data.textures, {room = room, type = "walls", id = tex.walls}) end
+            if tex.floors then table.insert(data.textures, {room = room, type = "floors", id = tex.floors}) end
         end
     end
     if houseInterior.ambiance then data.ambiances = houseInterior.ambiance end
     return data
 end
 
--- ==================== SERVER HOPPING ====================
-local function serverHop()
-    Fluent:Notify({ Title = "Server Hop", Content = "Teleporting via Matchmaking...", Duration = 3 })
-    TeleportService:Teleport(920587237, Players.LocalPlayer)
-end
-
-local function serverHopTrading()
-    Fluent:Notify({ Title = "Trading Server Hop", Content = "Teleporting to Trading Server...", Duration = 3 })
-    TeleportService:Teleport(132388544979740, Players.LocalPlayer)
-end
-
 -- ==================== UI SETUP ====================
 local Window = Fluent:CreateWindow({
-    Title = "Furniture Scanner & Placer",
-    SubTitle = "by Jadey IGOP", 
-    TabWidth = 120, 
-    Size = UDim2.fromOffset(500, 350), 
-    Acrylic = true, 
-    Theme = "Darker",
-    MinimizeKey = Enum.KeyCode.LeftControl
+    Title = "Furniture Scanner & Placer", SubTitle = "by Jadey IGOP", TabWidth = 120, 
+    Size = UDim2.fromOffset(500, 380), Acrylic = true, Theme = "Darker", MinimizeKey = Enum.KeyCode.LeftControl
 })
 
 local Tabs = {
@@ -240,332 +197,230 @@ local Tabs = {
 
 -- ==================== SCANNER TAB ====================
 local ScanStatus = Tabs.Scanner:AddParagraph({ Title = "Status", Content = "Ready to scan" })
-local SaveStatus, PlaceStatus
 
 Tabs.Scanner:AddToggle("AutoScanToggle", {
-    Title = "Active Auto-Scanner",
-    Default = true,
-    Callback = function(Value) autoScanEnabled = Value end
+    Title = "Background Auto-Scanner",
+    Description = "Silently harvests house layouts from ClientData.",
+    Default = true, Callback = function(Value) autoScanEnabled = Value end
 })
 
-local function runManualScan()
-    ScanStatus:SetDesc("Status: Scanning...")
-    local player = Players.LocalPlayer
-    local houseInterior = nil
-    
+Tabs.Scanner:AddToggle("AutoTourToggle", {
+    Title = "🚶 Auto-Tour (Physical TP)",
+    Description = "TPs to every door in Workspace.HouseExteriors. Skips previously visited doors.",
+    Default = false, Callback = function(Value) autoTourEnabled = Value end
+})
+
+Tabs.Scanner:AddButton({ Title = "🔍 Scan My Current House (Manual)", Callback = function()
+    ScanStatus:SetDesc("Status: Scanning Local House...")
+    local houseInt = nil
     pcall(function()
-        if ClientData.get_server then
-            houseInterior = ClientData.get_server(player, "house_interior")
-        elseif ClientData.get_data then
-            houseInterior = ClientData.get_data()[player.Name].house_interior
-        end
+        houseInt = (ClientData.get_server and ClientData.get_server(Players.LocalPlayer, "house_interior")) or (ClientData.get_data and ClientData.get_data()[Players.LocalPlayer.Name].house_interior)
     end)
-    
-    if not houseInterior or not houseInterior.player then 
-        ScanStatus:SetDesc("Status: ❌ No house interior found") 
-        return 
-    end
-
-    scannedData = parseHouseData(houseInterior)
+    if not houseInt or type(houseInt) ~= "table" then return ScanStatus:SetDesc("Status: ❌ No house interior found") end
+    scannedData = parseHouseData(houseInt)
     writefile(CURRENT_SCAN_FILE, HttpService:JSONEncode(scannedData))
-    
     local items, cost = calculateCost(scannedData)
-    local costString = "$" .. tostring(cost)
-    ScanStatus:SetDesc(string.format("✅ Saved! %d furnitures (Est. Value: %s)", items, costString))
-    
-    if PlaceStatus then 
-        PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costString)) 
-    end
+    ScanStatus:SetDesc(string.format("✅ Saved! %d furnitures (Est. Value: $%d)", items, cost))
     Fluent:Notify({ Title = "Scan Complete", Content = "House scanned successfully!", Duration = 3 })
-end
-
-Tabs.Scanner:AddButton({
-    Title = "🔍 Scan Everything (Manual Force)",
-    Callback = runManualScan
-})
+end})
 
 -- ==================== SAVE / LOAD TAB ====================
-SaveStatus = Tabs.SaveLoad:AddParagraph({ Title = "File Status", Content = "No scan data" })
-Tabs.SaveLoad:AddSection("💻 Local PC Saving")
+local SaveStatus = Tabs.SaveLoad:AddParagraph({ Title = "File Status", Content = "No scan data" })
+local saveNameInput, loadNameInput = "", ""
 
-local saveNameInput = ""
-Tabs.SaveLoad:AddInput("SaveName", {
-    Title = "Save House Name", Default = "", Placeholder = "Enter name",
-    Callback = function(text) saveNameInput = text end
-})
-
+Tabs.SaveLoad:AddInput("SaveName", { Title = "Save Name", Default = "", Callback = function(t) saveNameInput = t end })
 Tabs.SaveLoad:AddButton({ Title = "💾 Save to PC", Callback = function()
-    if saveNameInput == "" or #scannedData.furnitures == 0 then return Fluent:Notify({ Title = "Error", Content = "Missing name or scan data", Duration = 3 }) end
+    if saveNameInput == "" or #scannedData.furnitures == 0 then return end
     writefile(FOLDER_NAME .. "/" .. saveNameInput:gsub("[^%w_-]", "_") .. ".json", HttpService:JSONEncode(scannedData))
     Fluent:Notify({ Title = "Saved!", Content = "Saved locally.", Duration = 3 })
 end})
 
-local loadNameInput = ""
-Tabs.SaveLoad:AddInput("LoadName", {
-    Title = "Load House Name", Default = "", Placeholder = "Enter name to load",
-    Callback = function(text) loadNameInput = text end
-})
-
+Tabs.SaveLoad:AddInput("LoadName", { Title = "Load Name", Default = "", Callback = function(t) loadNameInput = t end })
 Tabs.SaveLoad:AddButton({ Title = "📂 Load from PC", Callback = function()
-    if loadSavedData(loadNameInput:gsub("[^%w_-]", "_")) then
-        local items, cost = calculateCost(scannedData)
-        local costStr = "$" .. tostring(cost)
-        SaveStatus:SetDesc(string.format("✅ Loaded: %s\n💰 Cost: %s", loadNameInput, costStr))
-        if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: %s", items, costStr)) end
-        Fluent:Notify({ Title = "Loaded!", Content = "Ready to place.", Duration = 3 })
-    else
-        Fluent:Notify({ Title = "Error", Content = "File not found.", Duration = 3 })
-    end
+    local filePath = FOLDER_NAME .. "/" .. loadNameInput:gsub("[^%w_-]", "_") .. ".json"
+    if isfile(filePath) then
+        local s, d = pcall(function() return HttpService:JSONDecode(readfile(filePath)) end)
+        if s and d and d.furnitures then
+            scannedData = d
+            local i, c = calculateCost(scannedData)
+            SaveStatus:SetDesc(string.format("✅ Loaded: %s\n💰 Cost: $%d", loadNameInput, c))
+            Fluent:Notify({ Title = "Loaded!", Content = "Ready to place.", Duration = 3 })
+        end
+    else Fluent:Notify({ Title = "Error", Content = "File not found.", Duration = 3 }) end
 end})
 
-Tabs.SaveLoad:AddSection("☁️ Server Share (Local Code)")
-
-Tabs.SaveLoad:AddButton({
-    Title = "⬆️ Upload to Local Server",
-    Callback = function()
-        if not httprequest then return Fluent:Notify({ Title = "Error", Content = "Your executor does not support HTTP requests.", Duration = 5 }) end
-        if #scannedData.furnitures == 0 then return Fluent:Notify({ Title = "Error", Content = "Scan a house first!", Duration = 3 }) end
-
-        SaveStatus:SetDesc("Status: ⏳ Uploading to Server...")
-        local success, response = pcall(function()
-            return httprequest({
-                Url = JSONBIN_URL,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json", ["X-Master-Key"] = API_KEY },
-                Body = HttpService:JSONEncode(scannedData)
-            })
-        end)
-
-        if success and response and response.StatusCode == 200 then
-            local decoded = HttpService:JSONDecode(response.Body)
-            local shareCode = decoded.metadata.id
-            if setclipboard then setclipboard(shareCode) end
-            SaveStatus:SetDesc("✅ Uploaded!\nCode: " .. shareCode .. "\n(Copied to clipboard!)")
-            Fluent:Notify({ Title = "Success!", Content = "Code generated: " .. shareCode, Duration = 10 })
-        else
-            SaveStatus:SetDesc("❌ Connection or HTTP Error.")
-        end
-    end
-})
-
-local cloudCodeInput = ""
-local recentCodesDropdown
-
-recentCodesDropdown = Tabs.SaveLoad:AddDropdown("RecentCodes", {
-    Title = "📜 Recent Local Codes",
-    Values = recentCodes,
-    Multi = false,
-    Default = nil,
-    Callback = function(Value) cloudCodeInput = Value end
-})
-
-Tabs.SaveLoad:AddInput("CloudCode", {
-    Title = "Enter Share Code", Default = "", Placeholder = "Paste the code here...",
-    Callback = function(text) cloudCodeInput = text end
-})
-
-Tabs.SaveLoad:AddButton({
-    Title = "⬇️ Load House from Server",
-    Callback = function()
-        if not httprequest or cloudCodeInput == "" then return end
-        SaveStatus:SetDesc("Status: ⏳ Downloading...")
-
-        local success, response = pcall(function()
-            return httprequest({ Url = JSONBIN_URL .. "/" .. cloudCodeInput, Method = "GET", Headers = { ["X-Master-Key"] = API_KEY } })
-        end)
-
-        if success and response and response.StatusCode == 200 then
-            local decoded = HttpService:JSONDecode(response.Body)
-            if decoded.record and decoded.record.furnitures then
-                scannedData = decoded.record
-                saveRecentCode(cloudCodeInput)
-                recentCodesDropdown:SetValues(recentCodes)
-
-                local items, cost = calculateCost(scannedData)
-                SaveStatus:SetDesc(string.format("✅ Downloaded!\n💰 Cost: $%d", cost))
-                if PlaceStatus then PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.", items)) end
-            end
-        else
-            SaveStatus:SetDesc("❌ Error fetching item.")
-        end
-    end
-})
-
 -- ==================== PLACER TAB ====================
-PlaceStatus = Tabs.Placer:AddParagraph({ Title = "Placer Status", Content = "Waiting for data..." })
+local PlaceStatus = Tabs.Placer:AddParagraph({ Title = "Placer Status", Content = "Waiting..." })
+Tabs.Placer:AddSlider("WaitTime", { Title = "Wait Time", Default = 0.05, Min = 0.01, Max = 1.0, Callback = function(v) globalWaitTime = v end })
+Tabs.Placer:AddButton({ Title = "🛑 STOP", Callback = function() isWorking = false end })
 
-Tabs.Placer:AddSlider("GlobalWaitTime", {
-    Title = "Wait Time Between Requests", Default = 0.05, Min = 0.01, Max = 1.0, Rounding = 2,
-    Callback = function(Value) globalWaitTime = Value end
-})
-
-Tabs.Placer:AddButton({ Title = "🛑 STOP PLACING", Callback = function() isWorking = false end })
-
-Tabs.Placer:AddButton({
-    Title = "🏠 Place Everything (Full Auto)",
-    Callback = function()
-        if not scannedData or #scannedData.furnitures == 0 then return end
-        isWorking = true 
-        local API = ReplicatedStorage:WaitForChild("API")
-        local totalPlaced = 0
-        
-        if scannedData.textures then
-            local BuyTexture = API:WaitForChild("HousingAPI/BuyTexture")
-            for i, tex in ipairs(scannedData.textures) do
-                if not isWorking then break end
-                pcall(function() BuyTexture:FireServer(tex.room, tex.type, tex.id) end)
-                task.wait(globalWaitTime)
-            end
-        end
-        
-        local BuyFurnitures = API:WaitForChild("HousingAPI/BuyFurnitures")
-        for i, furn in ipairs(scannedData.furnitures) do
+Tabs.Placer:AddButton({ Title = "🏠 Place Full Auto", Callback = function()
+    if not scannedData or #scannedData.furnitures == 0 then return end
+    isWorking = true 
+    local API = ReplicatedStorage:WaitForChild("API")
+    local total = 0
+    if scannedData.textures then
+        local BuyTex = API:WaitForChild("HousingAPI/BuyTexture")
+        for _, tex in ipairs(scannedData.textures) do
             if not isWorking then break end
-            pcall(function()
-                local d = { kind = furn.kind, properties = { scale = furn.properties.scale } }
-                if furn.properties.cframe then d.properties.cframe = CFrame.new(unpack(furn.properties.cframe)) end
-                if furn.properties.colors then
-                    local c = {}
-                    for j, color in pairs(furn.properties.colors) do 
-                        c[j] = (type(color)=="table" and #color==3) and Color3.new(color[1],color[2],color[3]) or color 
-                    end
-                    d.properties.colors = c
-                end
-                BuyFurnitures:InvokeServer({d})
-            end)
-            if i % 5 == 0 then PlaceStatus:SetDesc(string.format("🪑 Placing... %d/%d", i, #scannedData.furnitures)) end
+            pcall(function() BuyTex:FireServer(tex.room, tex.type, tex.id) end)
             task.wait(globalWaitTime)
-            totalPlaced += 1
         end
-        isWorking = false
-        PlaceStatus:SetDesc(string.format("✅ Complete! Total: %d placed", totalPlaced))
     end
-})
+    local BuyFurn = API:WaitForChild("HousingAPI/BuyFurnitures")
+    for i, furn in ipairs(scannedData.furnitures) do
+        if not isWorking then break end
+        pcall(function()
+            local d = { kind = furn.kind, properties = { scale = furn.properties.scale } }
+            if furn.properties.cframe then d.properties.cframe = CFrame.new(unpack(furn.properties.cframe)) end
+            if furn.properties.colors then
+                local c = {}
+                for j, color in pairs(furn.properties.colors) do c[j] = (type(color)=="table" and #color==3) and Color3.new(color[1],color[2],color[3]) or color end
+                d.properties.colors = c
+            end
+            BuyFurn:InvokeServer({d})
+        end)
+        if i % 5 == 0 then PlaceStatus:SetDesc(string.format("🪑 Placing... %d/%d", i, #scannedData.furnitures)) end
+        task.wait(globalWaitTime)
+        total += 1
+    end
+    isWorking = false
+    PlaceStatus:SetDesc(string.format("✅ Complete! Total: %d", total))
+end})
 
 -- ==================== DELETE TAB ====================
-local DeleteStatus = Tabs.Delete:AddParagraph({ Title = "Status", Content = "Ready to delete" })
+local DeleteStatus = Tabs.Delete:AddParagraph({ Title = "Status", Content = "Ready" })
 local deleteRange = 500
-
-Tabs.Delete:AddSlider("DeleteRange", { Title = "Delete Range", Default = 500, Min = 1, Max = 2000, Rounding = 0, Callback = function(V) deleteRange = V end })
-Tabs.Delete:AddButton({ Title = "🛑 STOP DELETING", Callback = function() isWorking = false end })
-
+Tabs.Delete:AddSlider("DeleteRange", { Title = "Delete Range", Default = 500, Min = 1, Max = 2000, Callback = function(v) deleteRange = v end })
+Tabs.Delete:AddButton({ Title = "🛑 STOP", Callback = function() isWorking = false end })
 Tabs.Delete:AddButton({ Title = "🗑️ Delete All Furnitures", Callback = function()
     isWorking = true 
-    local SellFurniture = ReplicatedStorage:WaitForChild("API"):WaitForChild("HousingAPI/SellFurniture")
+    local SellFurn = ReplicatedStorage:WaitForChild("API"):WaitForChild("HousingAPI/SellFurniture")
     for i = 1, deleteRange do
         if not isWorking then break end
-        pcall(function() SellFurniture:FireServer(true, {"f-" .. i}, "sell") end)
+        pcall(function() SellFurn:FireServer(true, {"f-" .. i}, "sell") end)
         task.wait(0.05)
     end
     isWorking = false
     DeleteStatus:SetDesc("✅ Done deleting")
 end})
 
--- ==================== TELEPORTS TAB (NEW) ====================
-local selectedPlayerName = ""
-local PlayerDropdown = Tabs.Teleports:AddDropdown("PlayerDropdown", {
-    Title = "Select Target Player",
-    Values = {},
-    Multi = false,
-    Default = nil,
-    Callback = function(val) selectedPlayerName = val end
-})
+-- ==================== TELEPORTS TAB ====================
+local selPlayer = ""
+local PlayerDrop = Tabs.Teleports:AddDropdown("PlayerDrop", { Title = "Select Player", Values = {}, Callback = function(v) selPlayer = v end })
 
-local function refreshPlayerList()
-    local list = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= Players.LocalPlayer then table.insert(list, p.Name) end
+Tabs.Teleports:AddButton({ Title = "🔄 Refresh Players", Callback = function()
+    local l = {}
+    for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then table.insert(l, p.Name) end end
+    PlayerDrop:SetValues(l)
+end})
+
+Tabs.Teleports:AddButton({ Title = "⚡ Teleport to Avatar", Callback = function()
+    local t = Players:FindFirstChild(selPlayer)
+    if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+        Players.LocalPlayer.Character.HumanoidRootPart.CFrame = t.Character.HumanoidRootPart.CFrame + Vector3.new(0,3,0)
     end
-    PlayerDropdown:SetValues(list)
-end
+end})
 
-Tabs.Teleports:AddButton({ Title = "🔄 Refresh Active Server Players", Callback = refreshPlayerList })
-
-Tabs.Teleports:AddButton({
-    Title = "⚡ Teleport to Chosen Player",
-    Callback = function()
-        if selectedPlayerName == "" then return end
-        local target = Players:FindFirstChild(selectedPlayerName)
-        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-            local root = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
-                Fluent:Notify({ Title = "Teleport Success", Content = "Walking into " .. selectedPlayerName .. "'s proximity.", Duration = 3 })
+Tabs.Teleports:AddButton({ Title = "🏠 Teleport to House Door", Callback = function()
+    local char = Players.LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local ext = workspace:FindFirstChild("HouseExteriors")
+    if not ext then return Fluent:Notify({ Title = "Error", Content = "HouseExteriors folder not found.", Duration = 3 }) end
+    
+    local found = false
+    for _, plot in ipairs(ext:GetChildren()) do
+        local owner = plot:GetAttribute("Owner")
+        local ownerVal = plot:FindFirstChild("Owner")
+        
+        if (owner == selPlayer) or (ownerVal and ownerVal.Value == Players:FindFirstChild(selPlayer)) then
+            local houseModel = plot:FindFirstChildWhichIsA("Model")
+            if houseModel then
+                -- Follow exact image path: Folder -> HouseModel -> Doors -> MainDoor -> Door
+                local door = houseModel:FindFirstChild("Doors") and houseModel.Doors:FindFirstChild("MainDoor") and houseModel.Doors.MainDoor:FindFirstChild("Door")
+                if door then
+                    char.HumanoidRootPart.CFrame = door.CFrame + Vector3.new(0, 3, 0)
+                    found = true
+                    Fluent:Notify({ Title = "Success", Content = "Jumped to " .. selPlayer .. "'s door.", Duration = 3 })
+                    break
+                end
             end
         end
     end
-})
-
--- ==================== MISC TAB ====================
-Tabs.Misc:AddSection("🌐 Server Management")
-Tabs.Misc:AddButton({ Title = "🚀 Server Hop (Normal)", Callback = serverHop })
-Tabs.Misc:AddButton({ Title = "📈 Hop to Trading Server", Callback = serverHopTrading })
+    if not found then Fluent:Notify({ Title = "Failed", Content = "Could not find their house on the map.", Duration = 3 }) end
+end})
 
 Window:SelectTab(1)
-refreshPlayerList()
 
--- ==================== DETECTOR & BACKGROUND TRACKER LOOP ====================
+-- ==================== AUTO TOUR (PHYSICAL DOOR HOPPER) ====================
 task.spawn(function()
     while true do
-        task.wait(1.5)
-        if autoScanEnabled then
+        task.wait(3)
+        if autoTourEnabled then
             pcall(function()
-                local player = Players.LocalPlayer
-                local houseInterior = nil
+                local char = Players.LocalPlayer.Character
+                if not char or not char:FindFirstChild("HumanoidRootPart") then return end
                 
-                if ClientData.get_server then
-                    houseInterior = ClientData.get_server(player, "house_interior")
-                elseif ClientData.get_data then
-                    houseInterior = ClientData.get_data()[player.Name].house_interior
-                end
+                local houseExteriors = workspace:FindFirstChild("HouseExteriors")
+                if not houseExteriors then return end
                 
-                if houseInterior and houseInterior.furniture and next(houseInterior.furniture) then
-                    local currentFingerprint = getHouseFingerprint(houseInterior)
-                    
-                    if currentFingerprint and currentFingerprint ~= lastTrackedHouseFingerprint then
-                        lastTrackedHouseFingerprint = currentFingerprint
-                        local currentOwner = houseInterior.player or "Unknown"
+                for _, plot in ipairs(houseExteriors:GetChildren()) do
+                    local houseModel = plot:FindFirstChildWhichIsA("Model")
+                    if houseModel then
+                        -- Generate a unique key so we don't return to the same previous TP
+                        local owner = plot:GetAttribute("Owner") or "Unknown"
+                        local uniqueKey = plot.Name .. "_" .. houseModel.Name .. "_" .. tostring(owner)
                         
-                        -- Verification Filter: Check if layout structure was logged or cloned
-                        if visitedHouses[currentFingerprint] then
-                            local match = visitedHouses[currentFingerprint]
-                            Fluent:Notify({
-                                Title = "🏠 Mass-Clone Detected!",
-                                Content = "This exact structural layout was already saved!\nOriginal Architect: " .. match.originalOwner,
-                                Duration = 6
-                            })
-                        else
-                            -- Fresh house detected: Auto parsing execution
-                            local autoScanned = parseHouseData(houseInterior)
-                            local totalItems, estCost = calculateCost(autoScanned)
-                            
-                            if totalItems > 3 then -- Ignore default completely empty houses
-                                local safeName = currentOwner:gsub("[^%w_-]", "_")
-                                local uniqueFileName = "AutoScan_" .. safeName .. "_" .. tostring(totalItems)
-                                
-                                writefile(FOLDER_NAME .. "/" .. uniqueFileName .. ".json", HttpService:JSONEncode(autoScanned))
-                                
-                                -- Sync state inside layout ledger
-                                visitedHouses[currentFingerprint] = {
-                                    originalOwner = currentOwner,
-                                    itemCount = totalItems,
-                                    savedAtFile = uniqueFileName,
-                                    timestamp = os.time()
-                                }
-                                writefile(VISITED_HOUSES_FILE, HttpService:JSONEncode(visitedHouses))
+                        if not sessionVisitedPlots[uniqueKey] then
+                            local door = houseModel:FindFirstChild("Doors") 
+                                         and houseModel.Doors:FindFirstChild("MainDoor") 
+                                         and houseModel.Doors.MainDoor:FindFirstChild("Door")
+                                         
+                            if door and door:IsA("BasePart") then
+                                char.HumanoidRootPart.CFrame = door.CFrame + Vector3.new(0, 2, 0)
+                                sessionVisitedPlots[uniqueKey] = true
                                 
                                 Fluent:Notify({
-                                    Title = "📥 House Harvested!",
-                                    Content = "Automatically saved layout from: " .. currentOwner .. " (" .. tostring(totalItems) .. " items)",
-                                    Duration = 5
+                                    Title = "Auto-Tour Active",
+                                    Content = "Hopped to Plot " .. plot.Name .. " (" .. houseModel.Name .. ")",
+                                    Duration = 3
                                 })
                                 
-                                -- Live update UI layout references
-                                scannedData = autoScanned
-                                ScanStatus:SetDesc(string.format("✅ Auto-Scanned: %s ($%d)", currentOwner, estCost))
-                                if PlaceStatus then 
-                                    PlaceStatus:SetDesc(string.format("✅ Ready to place %d items.\n💰 Estimated Cost: $%d", totalItems, estCost)) 
-                                end
+                                -- Wait 8 seconds at the door before jumping to the next to ensure interior loads
+                                task.wait(8)
+                                break 
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==================== BACKGROUND CLIENTDATA HARVESTER ====================
+task.spawn(function()
+    while true do
+        task.wait(2.5)
+        if autoScanEnabled then
+            pcall(function()
+                local allData = ClientData.get_data and ClientData.get_data()
+                if not allData then return end
+                
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p == Players.LocalPlayer then continue end
+                    local pData = allData[p.Name]
+                    if pData and type(pData) == "table" and pData.house_interior and type(pData.house_interior.furniture) == "table" then
+                        local currentFingerprint = getHouseFingerprint(pData.house_interior)
+                        if currentFingerprint and not visitedHouses[currentFingerprint] then
+                            local autoScanned = parseHouseData(pData.house_interior)
+                            local totalItems, estCost = calculateCost(autoScanned)
+                            if totalItems > 3 then 
+                                local uniqueFile = "AutoScan_" .. p.Name:gsub("[^%w_-]", "_") .. "_" .. totalItems
+                                writefile(FOLDER_NAME .. "/" .. uniqueFile .. ".json", HttpService:JSONEncode(autoScanned))
+                                visitedHouses[currentFingerprint] = { originalOwner = p.Name, itemCount = totalItems, savedAt = uniqueFile }
+                                writefile(VISITED_HOUSES_FILE, HttpService:JSONEncode(visitedHouses))
+                                Fluent:Notify({ Title = "📥 Harvested: " .. p.Name, Content = "Saved layout! (" .. totalItems .. " items | $" .. estCost .. ")", Duration = 4 })
                             end
                         end
                     end
