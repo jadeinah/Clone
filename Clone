@@ -2,7 +2,7 @@
 -- FURNITURE SCANNER, PLACER, & AUTO-HARVESTER (LOCAL CLOUD EDITION)
 -- Created by: Jadey IGOP & AI Collaborator
 -- UI Powered by: Fluent UI Framework
--- Ultimate Fix: Workspace.HouseExteriors Auto-Tour & No-Repeat Teleports
+-- Ultimate Fix: Workspace.HouseExteriors Auto-Tour & Server Hop
 -- =========================================================================
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -355,7 +355,58 @@ Tabs.Teleports:AddButton({ Title = "🏠 Teleport to House Door", Callback = fun
     if not found then Fluent:Notify({ Title = "Failed", Content = "Could not find their house on the map.", Duration = 3 }) end
 end})
 
-Window:SelectTab(1)
+-- ==================== MISC TAB ====================
+Tabs.Misc:AddParagraph({
+    Title = "Server Teleportation",
+    Content = "Use these tools to easily switch servers or reload."
+})
+
+Tabs.Misc:AddButton({
+    Title = "🔄 Server Hop",
+    Description = "Teleport to a different server with available slots.",
+    Callback = function()
+        Fluent:Notify({ Title = "Server Hop", Content = "Finding a new server...", Duration = 3 })
+        local PlaceId = game.PlaceId
+        local JobId = game.JobId
+        local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        
+        pcall(function()
+            if httprequest then
+                local response = httprequest({Url = url, Method = "GET"})
+                if response.StatusCode == 200 then
+                    local data = HttpService:JSONDecode(response.Body)
+                    if data and data.data then
+                        for _, server in ipairs(data.data) do
+                            if type(server) == "table" and server.playing < server.maxPlayers and server.id ~= JobId then
+                                TeleportService:TeleportToPlaceInstance(PlaceId, server.id, Players.LocalPlayer)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+})
+
+Tabs.Misc:AddButton({
+    Title = "🔁 Rejoin Server",
+    Description = "Reconnect to this exact same server.",
+    Callback = function()
+        Fluent:Notify({ Title = "Rejoining", Content = "Reconnecting...", Duration = 3 })
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
+    end
+})
+
+Tabs.Misc:AddButton({
+    Title = "❌ Destroy UI",
+    Description = "Closes the script interface completely.",
+    Callback = function()
+        Window:Destroy()
+    end
+})
+
+Window:SelectTab(1) 
 
 -- ==================== AUTO TOUR (PHYSICAL DOOR HOPPER) ====================
 task.spawn(function()
